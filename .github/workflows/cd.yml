@@ -1,0 +1,92 @@
+name: CD
+
+on:
+  push:
+  pull_request:
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  Build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        pythonVersion: [3.7, 3.8, 3.9]
+        libtorrent: [1.2.15, 2.0.5]
+        arch: [x64, x86]
+        include:
+          - arch: x64
+            wheel_arch: amd64
+          - arch: x86
+            wheel_arch: win32
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.pythonVersion}}
+          architecture: ${{ matrix.arch }}
+
+      - name: Cache pip
+        uses: actions/cache@v2
+        with:
+          path: '%LOCALAPPDATA%\pip\Cache'
+          # Look to see if there is a cache hit for the corresponding requirements file
+          key: ${{ runner.os }}-pip-${{ hashFiles('tox.ini', 'setup.py', 'requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Install dependencies
+        env:
+          PYTHONVERSION: ${{ matrix.pythonVersion}}
+          WHEEL_ARCH: ${{ matrix.wheel_arch }}
+          ARCH: ${{ matrix.arch }}
+          GVSBUILD: "https://github.com/doadin/gvsbuild/releases/download/1-7-2022-5/gvsbuild-py${{matrix.pythonVersion}}-vs16-${{matrix.arch}}.zip"
+          LIBTORRENT: ${{ matrix.libtorrent }}
+        run: |
+          $WebClient = New-Object System.Net.WebClient
+          $WebClient.DownloadFile($env:GVSBUILD,"C:\GTK.zip")
+          7z x C:\GTK.zip -oc:\GTK
+          $env:Path = "C:\GTK\release;C:\GTK\release\bin;C:\GTK\release\lib;$env:Path"
+          $env:Path
+          python -m pip install --upgrade pip wheel
+          $pycairopath = Get-Childitem –Path "C:\GTK\release\python\" -Include pycairo*.whl -File -Recurse -ErrorAction SilentlyContinue | select -expand FullName
+          $PyGObjectpath = Get-Childitem –Path "C:\GTK\release\python\" -Include PyGObject*.whl -File -Recurse -ErrorAction SilentlyContinue | select -expand FullName
+          pip install $pycairopath
+          pip install $PyGObjectpath
+          python -m pip install libtorrent==$env:LIBTORRENT
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Deluge
+        run: |
+          python setup.py clean
+          python setup.py build
+          python setup.py install
+
+      - name: Freeze Deluge
+        run: |
+          gci env:* | sort-object name
+          $env:Path = "C:\GTK\release;C:\GTK\release\bin;C:\GTK\release\lib;C:\OpenSSL-Win64\bin;C:\OpenSSL-Win32\bin;$env:Path"
+          pyinstaller --clean $env:GITHUB_WORKSPACE\packaging\win\delugewin.spec --distpath $env:GITHUB_WORKSPACE\packaging\win\freeze
+
+      - name: Make Deluge Installer
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          Set-Location -Path $env:GITHUB_WORKSPACE\packaging\win
+          python delugensis.py
+          makensis /Darch=$env:ARCH deluge-win-installer.nsi
+          Get-ChildItem $env:GITHUB_WORKSPACE\packaging\win
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: my-artifact-${{matrix.pythonVersion}}-${{matrix.libtorrent}}
+          path: packaging/win/*.exe
