@@ -10,6 +10,7 @@ import tarfile
 
 import pytest
 
+import deluge.common
 from deluge.common import (
     VersionSplit,
     archive_files,
@@ -108,33 +109,42 @@ class TestCommon:
         assert is_ipv6('2001:db8::')
         assert not is_ipv6('2001:db8:')
 
-    def get_windows_interface_name(self):
+    def get_windows_interfaces_names(self):
         import winreg
 
         # find a network card in the registery
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
             r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards',
-        ) as key:
-            assert winreg.QueryInfoKey(key)[0] > 0  # must have at least 1 network card
-            network_card = winreg.EnumKey(key, 0)
-        # get GUID of network card
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            fr'SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards\{network_card}',
-        ) as key:
-            for i in range(1):
-                value = winreg.EnumValue(key, i)
-                if value[0] == 'ServiceName':
-                    interface_name = value[1]
-        return interface_name
+        ) as netword_cards_key:
+            numbers_of_interfaces = winreg.QueryInfoKey(netword_cards_key)[0]
+            assert numbers_of_interfaces > 0  # must have at least 1 network card
+            # get GUID of network card
+            interfaces_names = []
+            for counter_1 in range(numbers_of_interfaces):
+                network_card = winreg.EnumKey(netword_cards_key, counter_1)
+                with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    fr'SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards\{network_card}',
+                ) as network_card_key:
+                    for counter_2 in range(winreg.QueryInfoKey(network_card_key)[1]):
+                        value = winreg.EnumValue(network_card_key, counter_2)
+                        if value[0] == 'ServiceName':
+                            interfaces_names.append(value[1])
+        return interfaces_names
 
     def test_is_interface_name(self):
         if windows_check():
-            interface_name = self.get_windows_interface_name()
+            interfaces_names = self.get_windows_interfaces_names()
             assert not is_interface_name('2001:db8:')
             assert not is_interface_name('{THIS0000-IS00-ONLY-FOR0-TESTING00000}')
-            assert is_interface_name(interface_name)
+            assert any(
+                is_interface_name(interface_name) for interface_name in interfaces_names
+            )
+            deluge.common.ifaddr = None
+            assert any(
+                is_interface_name(interface_name) for interface_name in interfaces_names
+            )
         else:
             assert is_interface_name('lo')
             assert not is_interface_name('127.0.0.1')
@@ -142,11 +152,17 @@ class TestCommon:
 
     def test_is_interface(self):
         if windows_check():
-            interface_name = self.get_windows_interface_name()
+            interfaces_names = self.get_windows_interfaces_names()
             assert is_interface('127.0.0.1')
-            assert is_interface(interface_name)
+            assert any(
+                is_interface(interface_name) for interface_name in interfaces_names
+            )
             assert not is_interface('127')
             assert not is_interface('{THIS0000-IS00-ONLY-FOR0-TESTING00000}')
+            deluge.common.ifaddr = None
+            assert any(
+                is_interface(interface_name) for interface_name in interfaces_names
+            )
         else:
             assert is_interface('lo')
             assert is_interface('127.0.0.1')
