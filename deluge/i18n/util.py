@@ -30,7 +30,7 @@ def get_translations_path():
 
 
 def get_languages():
-    lang = []
+    languages = []
 
     translations_path = get_translations_path()
     lc_messages_path = os.path.join('LC_MESSAGES', I18N_DOMAIN + '.mo')
@@ -43,16 +43,16 @@ def get_languages():
         ]
         break
     else:
-        return lang
+        return languages
 
     for i, lang_code in enumerate(lang_dirs):
         name = '%s (Language name missing)' % lang_code
         if lang_code in LANGUAGES:
             name = LANGUAGES[lang_code]
-        lang.append([lang_code, _(name)])
+        languages.append([lang_code, _(name)])
 
-    lang = sorted(lang, key=lambda l: l[1])
-    return lang
+    languages = sorted(languages, key=lambda lang: lang[1])
+    return languages
 
 
 def set_language(lang):
